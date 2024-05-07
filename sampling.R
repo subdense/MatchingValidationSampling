@@ -1,15 +1,18 @@
 
-library(devtools)
-devtools::install_github("gearslaboratory/gdalUtils")
 
 setwd(paste0(Sys.getenv('CS_HOME'),'/SuburbanDensification/Models/Matching/Validation/MatchingValidationSampling/'))
+
+#library(devtools)
+#devtools::install_github("gearslaboratory/gdalUtils")
+# -> fail, requires rgdal which has been discontinued
+source('gdalUtils.R') # code version: https://github.com/gearslaboratory/gdalUtils/tree/784b61c43727cbc9d27b275aa78d3e707ef04225
 
 library(sf)
 library(r5r) # install rJava with apt : https://github.com/s-u/rJava/issues/255 (fails jni)
 library(osmdata)
 library(osmextract)
 library(rjson)
-library(gdalUtils)
+#library(gdalUtils)
 #library(usethis)
 
 # cities and their countries (needed for OSM data download)
@@ -23,6 +26,8 @@ cities = list('Strasbourg'=c('France','Germany'),
 # radius in which networks are constructed to build isochrones
 max_bbox_radius = 400 #km 
 
+
+dir.create('data/osm',recursive = T, showWarnings = F)
 
 # 1) Get OSM data
 
@@ -43,18 +48,23 @@ write(rjson::toJSON(list(provider='geofabrik',date=as.character(Sys.Date()), pat
 
 # 2) Construct multimodal isochrone
 
+# https://www.crs-geo.eu/crs-pan-european.htm
+etrs89lcc = "+proj=lcc +lat_0=52 +lon_0=10 +lat_1=35 +lat_2=65 +x_0=4000000 +y_0=2800000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs"
+wgs84 = "+proj=longlat +datum=WGS84 +no_defs +type=crs"
+
 # extract OSM networks
 for(city in names(cities)){
-  city_centroid = st_transform(st_centroid(osmdata::getbb(city)),'ETRS89-LCC') # https://www.crs-geo.eu/crs-pan-european.htm
-  broad_bbox = st_transform(st_bbox(st_multipoint(matrix(data = c(city_centroid$x - max_bbox_radius*1000, city_centroid$y - max_bbox_radius*1000, 
-                                                     city_centroid$x - max_bbox_radius*1000, city_centroid$y + max_bbox_radius*1000,
-                                                     city_centroid$x + max_bbox_radius*1000, city_centroid$y - max_bbox_radius*1000,
-                                                     city_centroid$x + max_bbox_radius*1000, city_centroid$y + max_bbox_radius*1000
-                                                     ), ncol = 2, byrow = T))), 4326)
+  city_centroid = st_transform(st_centroid(st_sfc(st_multipoint(osmdata::getbb(city))) %>% st_set_crs(wgs84)), etrs89lcc)
+  bbox_data = c(st_coordinates(city_centroid)[,1] - max_bbox_radius*1000, st_coordinates(city_centroid)[,2] - max_bbox_radius*1000, 
+                st_coordinates(city_centroid)[,1] - max_bbox_radius*1000, st_coordinates(city_centroid)[,2] + max_bbox_radius*1000,
+                st_coordinates(city_centroid)[,1] + max_bbox_radius*1000, st_coordinates(city_centroid)[,2] - max_bbox_radius*1000,
+                st_coordinates(city_centroid)[,1] + max_bbox_radius*1000, st_coordinates(city_centroid)[,2] + max_bbox_radius*1000
+                )
+  broad_bbox = st_bbox(st_transform(st_sfc(st_multipoint(matrix(data = bbox_data, ncol = 2, byrow = T)), crs = etrs89lcc), wgs84))
   network =  st_sf(st_sfc())
   for(country in cities[city]){
     network = rbind(network,
-      oe_get(place=country, query = "SELECT * FROM 'lines' WHERE highway IS NOT NULL",
+      oe_get(place=country, query = "SELECT * FROM lines WHERE highway IS NOT NULL",
              boundary = broad_bbox, boundary_type = "spat")
     )
   }
