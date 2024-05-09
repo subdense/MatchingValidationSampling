@@ -13,6 +13,7 @@ library(osmdata)
 library(osmextract)
 library(rjson)
 library(dplyr)
+library(httr)
 #library(gdalUtils)
 #library(usethis)
 
@@ -69,22 +70,38 @@ for(city in names(cities)){
                 st_coordinates(city_centroid)[,1] + max_bbox_radius*1000, st_coordinates(city_centroid)[,2] + max_bbox_radius*1000
                 )
   broad_bbox = st_bbox(st_transform(st_sfc(st_multipoint(matrix(data = bbox_data, ncol = 2, byrow = T)), crs = etrs89lcc), wgs84)) %>% st_as_sfc()
-  network =  st_sf(st_sfc(),crs = wgs84)
+  
+  #network =  st_sf(st_sfc(),crs = wgs84)
+  #for(country in cities[city]){
+  #  datafile = paste0('geofabrik_',strsplit(tail(strsplit(oe_match(country)$url,'/',fixed=T)[[1]], n=1),'.',fixed=T)[[1]][1], '.gpkg')
+  #  allnw = st_read(paste0(osm_data_dir, datafile), 'lines') %>% dplyr::filter(!is.na(highway)) %>% st_transform(wgs84)
+  #  network = rbind(network,
+  #    #oe_get(place=country, query = "SELECT * FROM lines WHERE highway IS NOT NULL",
+  #    #       boundary = broad_bbox, boundary_type = "spat")
+  #    st_intersection(allnw,broad_bbox)
+  #  )
+  #}
   for(country in cities[city]){
-    datafile = paste0('geofabrik_',strsplit(tail(strsplit(oe_match(country)$url,'/',fixed=T)[[1]], n=1),'.',fixed=T)[[1]][1], '.gpkg')
-    allnw = st_read(paste0(osm_data_dir, datafile), 'lines') %>% dplyr::filter(!is.na(highway)) %>% st_transform(wgs84)
-    network = rbind(network,
-      #oe_get(place=country, query = "SELECT * FROM lines WHERE highway IS NOT NULL",
-      #       boundary = broad_bbox, boundary_type = "spat")
-      st_intersection(allnw,broad_bbox)
-    )
+    # osmosis --read-pbf geofabrik_luxembourg-latest.osm.pbf --bounding-box top=49.61773 left=6.121288 bottom=49.59816 right=6.151396 --tf accept-ways highway=* --used-node --write-pbf test.osm.pbf
+    # ogr2ogr test.gpkg test.osm.pbf 
   }
   
   dir.create(paste0(data_dir,city),showWarnings = F)
-  st_write(network, dsn = paste0(data_dir,city,'/network.gpkg'), layer = city)
-  sf::gdal_utils(util = "vectortranslate", source = paste0(data_dir,city,'/network.gpkg'), destination = paste0(data_dir,city,'/network.osm.pbf'),options = c("-f", "OSM"))
+  
+  #st_write(network, dsn = paste0(data_dir,city,'/network.gpkg'), layer = city)
+  #sf::gdal_utils(util = "vectortranslate", source = paste0(data_dir,city,'/network.gpkg'), destination = paste0(data_dir,city,'/network.osm.pbf'),options = c("-f", "OSM"))
   
 }
+
+
+
+# getting GTFS data from the Mobility Database https://mobilitydatabase.org/
+
+#curl --location 'https://api.mobilitydatabase.org/v1/tokens'\
+#--header 'Content-Type: application/json'\
+#--data '{ "refresh_token": "[Your Refresh Token]" }'
+#curl_fetch_memory('https://api.mobilitydatabase.org/v1/tokens')
+
 
 
 # for java R5
