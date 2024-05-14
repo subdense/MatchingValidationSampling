@@ -5,7 +5,7 @@ setwd(paste0(Sys.getenv('CS_HOME'),'/SuburbanDensification/Models/Matching/Valid
 #library(devtools)
 #devtools::install_github("gearslaboratory/gdalUtils")
 # -> fail, requires rgdal which has been discontinued
-source('gdalUtils.R') # code version: https://github.com/gearslaboratory/gdalUtils/tree/784b61c43727cbc9d27b275aa78d3e707ef04225
+#source('gdalUtils.R') # code version: https://github.com/gearslaboratory/gdalUtils/tree/784b61c43727cbc9d27b275aa78d3e707ef04225
 
 library(sf)
 library(r5r) # install rJava with apt : https://github.com/s-u/rJava/issues/255 (fails jni)
@@ -13,6 +13,7 @@ library(osmdata)
 library(osmextract)
 library(rjson)
 library(dplyr)
+library(readr)
 library(httr)
 #library(gdalUtils)
 #library(usethis)
@@ -52,7 +53,9 @@ for(country in unique(unlist(cities))){
   #oe_get(country, download_only=T, skip_vectortranslate = T, max_file_size = 5e10)
   oe_get(country, max_file_size = 5e10)
 }
-write(rjson::toJSON(list(provider='geofabrik',date=as.character(Sys.Date()), path='./data/osm/')),'osm.json')
+
+# uncomment for prod
+#write(rjson::toJSON(list(provider='geofabrik',date=as.character(Sys.Date()), path='./data/osm/')),'osm.json')
 
 
 # 2) Construct multimodal isochrone
@@ -82,11 +85,22 @@ for(city in names(cities)){
   #  )
   #}
   for(country in cities[city]){
+    datafile = paste0('geofabrik_',strsplit(tail(strsplit(oe_match(country)$url,'/',fixed=T)[[1]], n=1),'.',fixed=T)[[1]][1])
+    
     # osmosis --read-pbf geofabrik_luxembourg-latest.osm.pbf --bounding-box top=49.61773 left=6.121288 bottom=49.59816 right=6.151396 --tf accept-ways highway=* --used-node --write-pbf test.osm.pbf
+    system(paste0('osmosis --read-pbf ', osm_data_dir, datafile, '.osm.pbf --bounding-box top=', st_bbox(broad_bbox)$ymax, ' left=',st_bbox(broad_bbox)$xmin, ' bottom=',st_bbox(broad_bbox)$ymin, ' right=',st_bbox(broad_bbox)$xmax,' --tf accept-ways highway=* --used-node --write-pbf ',osm_data_dir, datafile,'_',city,'_highways.osm.pbf'))
+    
+    # not needed
     # ogr2ogr test.gpkg test.osm.pbf 
+    #system(paste0('ogr2ogr ',osm_data_dir, datafile,'_',city,'_highways.gpkg ',osm_data_dir, datafile,'_',city,'_highways.osm.pbf'))
+    
   }
   
   dir.create(paste0(data_dir,city),showWarnings = F)
+  
+  # TODO merge if more than one country
+  # cp data/osm/geofabrik_luxembourg-latest_Luxembourg_highways.osm.pbf 
+  # system(paste0('cp ',data_dir, city,'highways.osm.pbf'))
   
   #st_write(network, dsn = paste0(data_dir,city,'/network.gpkg'), layer = city)
   #sf::gdal_utils(util = "vectortranslate", source = paste0(data_dir,city,'/network.gpkg'), destination = paste0(data_dir,city,'/network.osm.pbf'),options = c("-f", "OSM"))
@@ -101,7 +115,55 @@ for(city in names(cities)){
 #--header 'Content-Type: application/json'\
 #--data '{ "refresh_token": "[Your Refresh Token]" }'
 #curl_fetch_memory('https://api.mobilitydatabase.org/v1/tokens')
+refreshToken = gsub('\n','',read_file(paste0(data_dir,'.mobilitydatabase')), fixed=T)
 
+req = POST('https://api.mobilitydatabase.org/v1/tokens', add_headers('Content-Type' = 'application/json'), body=paste0('{ "refresh_token": "',refreshToken,'" }'))
+token = content(req)$access_token
+
+
+#content(GET(paste0('https://api.mobilitydatabase.org/v1/search?search_query="mdb"'), add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
+
+#allfeeds = content(GET(paste0('https://api.mobilitydatabase.org/v1/feeds'), add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
+#sapply(allfeeds,function(x){x$feed_name})
+#allfeeds[[714]]
+
+#feed_data = content(GET('https://api.mobilitydatabase.org/v1/feeds/mdb-1640', add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
+#feed_data = content(GET('https://api.mobilitydatabase.org/v1/gtfs_feeds/mdb-1640/datasets', add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
+
+#all_gtfs_feeds = content(GET(paste0('https://api.mobilitydatabase.org/v1/gtfs_feeds'), add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
+#sapply(all_gtfs_feeds,function(x){x$feed_name})
+#all_gtfs_feeds[[544]]
+#feed_data = content(GET('https://api.mobilitydatabase.org/v1/gtfs_feeds/mdb-1924/datasets', add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
+#feed_data = content(GET('https://api.mobilitydatabase.org/v1/datasets/gtfs/mdb-1210-202402121801', add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
+# $latest_dataset$hosted_url
+# https://files.mobilitydatabase.org/mdb-1924/mdb-1924-202405130021/mdb-1924-202405130021.zip
+
+# locations
+#gtfs = st_sfc(st_multipoint(
+#matrix(unlist(sapply(all_gtfs_feeds,function(x){
+#  bb = x$latest_dataset$bounding_box
+#  if(!is.null(bb)){
+#    c(bb$minimum_longitude,bb$minimum_latitude)
+#    }
+#})),ncol=2,byrow = T)), crs=wgs84)
+
+# -> search by bbox? - list explicitely feeds
+
+#gtfs_fr = content(GET(paste0('https://api.mobilitydatabase.org/v1/gtfs_feeds?country_code=FR'), add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
+#unlist(sapply(gtfs_fr,function(x){x$locations[[1]]$municipality}))
+#gtfs_fr[[2]]
+
+catalog = read_csv('https://storage.googleapis.com/storage/v1/b/mdb-csv/o/sources.csv?alt=media')
+
+
+# mdb ids
+gtfs_feeds = list('Luxembourg'=c(1108))
+
+for(city in names(cities)){
+  zipfile=paste0(data_dir,city,'/',city,'.zip')
+  download.file(catalog$urls.latest[gtfs_feeds[[city]][1]],destfile = zipfile)
+  unzip(zipfile,exdir = paste0(data_dir,city))
+}
 
 
 # for java R5
