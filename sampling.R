@@ -26,7 +26,7 @@ cities=list('Luxembourg'=c('Luxembourg', 'France')) # test
 #max_bbox_radius = 100 #km 
 max_bbox_radius = 30
 
-processing_steps = c(download_osm=T, road_network=T)
+processing_steps = c(download_osm=T, road_network=T, download_gtfs=T)
 
 osm_data_dir = './data/osm/'
 data_dir = './data/'
@@ -74,76 +74,37 @@ if(processing_steps['road_network']){
   
     dir.create(paste0(data_dir,city),showWarnings = F)
   
-    for(country in cities[city]){
-      datafile = paste0('geofabrik_',strsplit(tail(strsplit(oe_match(country)$url,'/',fixed=T)[[1]], n=1),'.',fixed=T)[[1]][1])
-    
+    datafiles=c()
+    for(country in cities[[city]]){
+      datafile_root = paste0('geofabrik_',strsplit(tail(strsplit(oe_match(country)$url,'/',fixed=T)[[1]], n=1),'.',fixed=T)[[1]][1])
+      datafile = paste0(datafile_root,'.osm.pbf')
+      highwaysfile = paste0(osm_data_dir,datafile_root,'_',city,'_highways','.osm.pbf')
+      datafiles = append(datafiles,highwaysfile)
+      
       # osmosis --read-pbf geofabrik_luxembourg-latest.osm.pbf --bounding-box top=49.61773 left=6.121288 bottom=49.59816 right=6.151396 --tf accept-ways highway=* --used-node --write-pbf test.osm.pbf
       system(paste0('osmosis --read-pbf ', osm_data_dir, datafile,
-                  '.osm.pbf --bounding-box top=', st_bbox(broad_bbox)$ymax,
+                  ' --bounding-box top=', st_bbox(broad_bbox)$ymax,
                   ' left=',st_bbox(broad_bbox)$xmin, ' bottom=',st_bbox(broad_bbox)$ymin,
                   ' right=',st_bbox(broad_bbox)$xmax,' --tf accept-ways highway=* --used-node --write-pbf ',
-                  osm_data_dir, datafile,'_',city,'_highways.osm.pbf')
+                  highwaysfile)
            )
-    
-      # not needed
-      # ogr2ogr test.gpkg test.osm.pbf 
-      #system(paste0('ogr2ogr ',osm_data_dir, datafile,'_',city,'_highways.gpkg ',osm_data_dir, datafile,'_',city,'_highways.osm.pbf'))
-      
-      system(paste0('cp ',osm_data_dir, datafile,'_',city,'_highways.osm.pbf ',data_dir,city,'/highways.osm.pbf'))
-    
     }
   
-  
-    # TODO merge if more than one country
-    # cp data/osm/geofabrik_luxembourg-latest_Luxembourg_highways.osm.pbf 
-   
-    #st_write(network, dsn = paste0(data_dir,city,'/network.gpkg'), layer = city)
-    #sf::gdal_utils(util = "vectortranslate", source = paste0(data_dir,city,'/network.gpkg'), destination = paste0(data_dir,city,'/network.osm.pbf'),options = c("-f", "OSM"))
+    # osmosis --rb file1.osm --rb file2.osm --merge --wb merged.osm
+    system(paste0('osmosis --rb ',paste0(datafiles,collapse = ' --rb '),' ',paste0(rep('--merge',length(cities[[city]])-1)),' --wb ',osm_data_dir,city,"_highways.osm.pbf"))
+    
+    system(paste0('cp ',osm_data_dir,city,'_highways.osm.pbf ',data_dir,city,'/highways.osm.pbf'))
+    
   }
   
 }
 
 
-
-# 2.2) Getting GTFS data from the Mobility Database https://mobilitydatabase.org/
-
-#  Register an account on the database and put your refresh token in .mobilitydatabase
-refreshToken = gsub('\n','',read_file(paste0(data_dir,'.mobilitydatabase')), fixed=T)
-req = POST('https://api.mobilitydatabase.org/v1/tokens', add_headers('Content-Type' = 'application/json'), body=paste0('{ "refresh_token": "',refreshToken,'" }'))
-token = content(req)$access_token
+######
+# 3) Get GTFS data from the Mobility Database https://mobilitydatabase.org/
 
 
-#content(GET(paste0('https://api.mobilitydatabase.org/v1/search?search_query="mdb"'), add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
-
-#allfeeds = content(GET(paste0('https://api.mobilitydatabase.org/v1/feeds'), add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
-#sapply(allfeeds,function(x){x$feed_name})
-#allfeeds[[714]]
-
-#feed_data = content(GET('https://api.mobilitydatabase.org/v1/feeds/mdb-1640', add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
-#feed_data = content(GET('https://api.mobilitydatabase.org/v1/gtfs_feeds/mdb-1640/datasets', add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
-
-#all_gtfs_feeds = content(GET(paste0('https://api.mobilitydatabase.org/v1/gtfs_feeds'), add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
-#sapply(all_gtfs_feeds,function(x){x$feed_name})
-#all_gtfs_feeds[[544]]
-#feed_data = content(GET('https://api.mobilitydatabase.org/v1/gtfs_feeds/mdb-1924/datasets', add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
-#feed_data = content(GET('https://api.mobilitydatabase.org/v1/datasets/gtfs/mdb-1210-202402121801', add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
-# $latest_dataset$hosted_url
-# https://files.mobilitydatabase.org/mdb-1924/mdb-1924-202405130021/mdb-1924-202405130021.zip
-
-# locations
-#gtfs = st_sfc(st_multipoint(
-#matrix(unlist(sapply(all_gtfs_feeds,function(x){
-#  bb = x$latest_dataset$bounding_box
-#  if(!is.null(bb)){
-#    c(bb$minimum_longitude,bb$minimum_latitude)
-#    }
-#})),ncol=2,byrow = T)), crs=wgs84)
-
-# -> search by bbox? - list explicitely feeds
-
-#gtfs_fr = content(GET(paste0('https://api.mobilitydatabase.org/v1/gtfs_feeds?country_code=FR'), add_headers('Accept'= 'application/json', 'Authorization'=paste0('Bearer ',token))))
-#unlist(sapply(gtfs_fr,function(x){x$locations[[1]]$municipality}))
-#gtfs_fr[[2]]
+if(processing_steps['download_gtfs']){
 
 catalog = read_csv('https://storage.googleapis.com/storage/v1/b/mdb-csv/o/sources.csv?alt=media')
 
@@ -160,6 +121,7 @@ for(city in names(cities)){
   unzip(zipfile,exdir = paste0(data_dir,city))
 }
 
+}
 
 # 2.3) Construct the network using r5r
 
@@ -187,7 +149,7 @@ point_grid <- function(orig, step, size){
 }
 
 orig = data.frame(id='1',st_coordinates(st_centroid(broad_bbox))); names(orig)<-c('id','lon','lat')
-points_dest = point_grid(st_centroid(broad_bbox), 1000, 10)
+points_dest = point_grid(st_centroid(broad_bbox), 1000, 30)
 dest = st_coordinates(points_dest)
 dest = data.frame(id = as.character(1:nrow(dest)), lon=dest[,1], lat=dest[,2])
 
@@ -204,10 +166,10 @@ travel_time = travel_time_matrix(network, orig, dest,mode=c("TRANSIT","CAR"),
                                  max_trip_duration = 240,verbose = T, progress = T)
 dest$time = rep(NA, nrow(dest))
 dest$time[as.numeric(travel_time$to_id)] = travel_time$travel_time_p50
-ggplot(dest[!is.na(dest$time),])+geom_point(aes(x=lon,y=lat,color=time),size=2, shape=1)
+ggplot(dest[!is.na(dest$time),])+geom_point(aes(x=lon,y=lat,col=time),size=2)
 
 det = detailed_itineraries(network, orig, dest,mode=c("TRANSIT","CAR"),
-                           max_trip_duration = 240,verbose = T, progress = T)
+                           max_trip_duration = 360,verbose = T, progress = T)
 
 library(ggplot2)
 ggplot() +geom_sf(data = street_net$edges, color='gray85') +
