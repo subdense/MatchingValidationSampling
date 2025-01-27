@@ -57,17 +57,19 @@ if(processing_steps['download_osm']){
 }
   
 
-# extract OSM networks
+########
+# 2) extract OSM road network
+########
 
 if(processing_steps['road_network']){
 
   for(city in names(cities)){
     city_centroid = st_transform(st_centroid(st_sfc(st_multipoint(t(osmdata::getbb(city)))) %>% st_set_crs(wgs84)), etrs89lcc)
-    bbox_data = c(st_coordinates(city_centroid)[,1] - max_bbox_radius*1000, st_coordinates(city_centroid)[,2] - max_bbox_radius*1000, 
-                st_coordinates(city_centroid)[,1] - max_bbox_radius*1000, st_coordinates(city_centroid)[,2] + max_bbox_radius*1000,
-                st_coordinates(city_centroid)[,1] + max_bbox_radius*1000, st_coordinates(city_centroid)[,2] - max_bbox_radius*1000,
-                st_coordinates(city_centroid)[,1] + max_bbox_radius*1000, st_coordinates(city_centroid)[,2] + max_bbox_radius*1000
-                )
+    bbox_data = c(st_coordinates(city_centroid)[,1] - max_bbox_radius*1000, st_coordinates(city_centroid)[,2] - max_bbox_radius*1000,
+                  st_coordinates(city_centroid)[,1] - max_bbox_radius*1000, st_coordinates(city_centroid)[,2] + max_bbox_radius*1000,
+                  st_coordinates(city_centroid)[,1] + max_bbox_radius*1000, st_coordinates(city_centroid)[,2] - max_bbox_radius*1000,
+                  st_coordinates(city_centroid)[,1] + max_bbox_radius*1000, st_coordinates(city_centroid)[,2] + max_bbox_radius*1000
+                 )
     broad_bbox = st_bbox(st_transform(st_sfc(st_multipoint(matrix(data = bbox_data, ncol = 2, byrow = T)), crs = etrs89lcc), wgs84)) %>% st_as_sfc()
   
     dir.create(paste0(data_dir,city),showWarnings = F)
@@ -103,14 +105,10 @@ if(processing_steps['road_network']){
 
 
 
-# getting GTFS data from the Mobility Database https://mobilitydatabase.org/
+# 2.2) Getting GTFS data from the Mobility Database https://mobilitydatabase.org/
 
-#curl --location 'https://api.mobilitydatabase.org/v1/tokens'\
-#--header 'Content-Type: application/json'\
-#--data '{ "refresh_token": "[Your Refresh Token]" }'
-#curl_fetch_memory('https://api.mobilitydatabase.org/v1/tokens')
+#  Register an account on the database and put your refresh token in .mobilitydatabase
 refreshToken = gsub('\n','',read_file(paste0(data_dir,'.mobilitydatabase')), fixed=T)
-
 req = POST('https://api.mobilitydatabase.org/v1/tokens', add_headers('Content-Type' = 'application/json'), body=paste0('{ "refresh_token": "',refreshToken,'" }'))
 token = content(req)$access_token
 
@@ -149,7 +147,6 @@ token = content(req)$access_token
 
 catalog = read_csv('https://storage.googleapis.com/storage/v1/b/mdb-csv/o/sources.csv?alt=media')
 
-
 # mdb ids in the catalog
 gtfs_feeds = list(
   'Luxembourg'=c(1108),
@@ -164,32 +161,18 @@ for(city in names(cities)){
 }
 
 
-Sys.setenv(JAVA_HOME = '/usr/lib/jvm/java-1.21.0-openjdk-amd64')
+# 2.3) Construct the network using r5r
 
-
-library(r5r) # install rJava with apt : https://github.com/s-u/rJava/issues/255 (fails jni)
-
-
-# for java R5
+Sys.setenv(JAVA_HOME = '/usr/lib/jvm/java-1.21.0-openjdk-amd64') # r5r requires java 21
+library(r5r) # install rJava with apt : https://github.com/s-u/rJava/issues/255 (fails jni otherwise)
 options(java.parameters = '-Xmx32G')
 
-#Sys.setenv(JAVA_HOME = '/usr/lib/jvm/java-1.21.0-openjdk-amd64')
-# sudo R CMD javareconf JAVA_HOME=/usr/lib/jvm/java-1.21.0-openjdk-amd64
-# see https://stackoverflow.com/questions/28133360/rjava-is-not-picking-up-the-correct-java-version
-
 network <- setup_r5(data_path = paste0(data_dir,city))
-
 street_net <- street_network_to_sf(network)
 
-#orig = data.frame(id='1',st_coordinates(st_centroid(broad_bbox)))
-#names(orig)<-c('id','lon','lat')
-#dest = data.frame(id=as.character(1:4),st_coordinates(broad_bbox)[1:4,c(1,2)])
-#names(dest)<-c('id','lon','lat')
 
-#set.seed(42)
-#orig = data.frame(id='1',st_coordinates(street_net$vertices[sample.int(nrow(street_net$vertices), size=1),]));names(orig)<-c('id','lon','lat')
-#dest = data.frame(id='1',st_coordinates(street_net$vertices[sample.int(nrow(street_net$vertices), size=1),]));names(dest)<-c('id','lon','lat')
-#gc()
+# 2.4) Construct isochrones
+
 
 #'
 #' constructs a point grid around the origin point (wgs84), with a given step (meters), of width/height 2*size+1
