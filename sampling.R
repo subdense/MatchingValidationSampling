@@ -1,6 +1,7 @@
 
 setwd(paste0(Sys.getenv('CS_HOME'),'/SuburbanDensification/Models/Matching/Validation/MatchingValidationSampling/'))
 
+
 library(sf)
 library(osmdata)
 library(osmextract)
@@ -9,6 +10,12 @@ library(dplyr)
 library(readr)
 library(httr)
 library(ggplot2)
+library(r5r) # install rJava with apt : https://github.com/s-u/rJava/issues/255 (fails jni otherwise)
+
+source('functions.R')
+
+Sys.setenv(JAVA_HOME = '/usr/lib/jvm/java-1.21.0-openjdk-amd64') # r5r requires java 21
+options(java.parameters = '-Xmx32G')
 
 
 # cities and their countries (needed for OSM data download)
@@ -20,13 +27,14 @@ library(ggplot2)
 #              'Liverpool'=c('England', 'Wales'),
 #              'Bristol'=c('England', 'Wales')
 #              )
-cities=list('Luxembourg'=c('Luxembourg', 'France')) # test
+cities=list('Luxembourg'=c('Luxembourg', 'France', 'Germany', 'Belgium')) # test
 
 # radius in which networks are constructed to build isochrones
 #max_bbox_radius = 100 #km 
 max_bbox_radius = 30
 
-processing_steps = c(download_osm=T, road_network=T, download_gtfs=T)
+processing_steps = c(download_osm=T, road_network=T, download_gtfs=T,
+                     contruct_network=T, compute_isochrones=T)
 
 osm_data_dir = './data/osm/'
 data_dir = './data/'
@@ -48,7 +56,7 @@ if(processing_steps['download_osm']){
 
   options(timeout = 3600)
   for(country in unique(unlist(cities))){
-    oe_get(country, max_file_size = 5e10)
+    oe_get(country, max_file_size = 5e10, download_only = T, skip_vectortranslate = T)
   }
 
   # TODO proper metadata export
@@ -81,7 +89,7 @@ if(processing_steps['road_network']){
       highwaysfile = paste0(osm_data_dir,datafile_root,'_',city,'_highways','.osm.pbf')
       datafiles = append(datafiles,highwaysfile)
       
-      # osmosis --read-pbf geofabrik_luxembourg-latest.osm.pbf --bounding-box top=49.61773 left=6.121288 bottom=49.59816 right=6.151396 --tf accept-ways highway=* --used-node --write-pbf test.osm.pbf
+      # osmosis command to extract from bounding box and filter highways
       system(paste0('osmosis --read-pbf ', osm_data_dir, datafile,
                   ' --bounding-box top=', st_bbox(broad_bbox)$ymax,
                   ' left=',st_bbox(broad_bbox)$xmin, ' bottom=',st_bbox(broad_bbox)$ymin,
@@ -90,9 +98,10 @@ if(processing_steps['road_network']){
            )
     }
   
-    # osmosis --rb file1.osm --rb file2.osm --merge --wb merged.osm
+    # osmosis command to merge pbf files (command `--merge` has to appear N_files - 1)
     system(paste0('osmosis --rb ',paste0(datafiles,collapse = ' --rb '),' ',paste0(rep('--merge',length(cities[[city]])-1)),' --wb ',osm_data_dir,city,"_highways.osm.pbf"))
     
+    # copy final file to data dir
     system(paste0('cp ',osm_data_dir,city,'_highways.osm.pbf ',data_dir,city,'/highways.osm.pbf'))
     
   }
@@ -102,82 +111,80 @@ if(processing_steps['road_network']){
 
 ######
 # 3) Get GTFS data from the Mobility Database https://mobilitydatabase.org/
-
+######
 
 if(processing_steps['download_gtfs']){
 
-catalog = read_csv('https://storage.googleapis.com/storage/v1/b/mdb-csv/o/sources.csv?alt=media')
+  # get open catalog, does not need an API token
+  catalog = read_csv('https://storage.googleapis.com/storage/v1/b/mdb-csv/o/sources.csv?alt=media')
 
-# mdb ids in the catalog
-gtfs_feeds = list(
-  'Luxembourg'=c(1108),
-  'Toulouse'=c(1024)
-)
+  # mdb ids in the catalog (to be determined by hand)
+  gtfs_feeds = list(
+    'Luxembourg'=c(1108,1091),# Chemins Fer Luxembourgeois, Aggregated Luxembourg
+    'Toulouse'=c(1024)
+  )
 
-# TODO handle multiple GTFS
-for(city in names(cities)){
-  zipfile=paste0(data_dir,city,'/',city,'.zip')
-  download.file(catalog$urls.latest[gtfs_feeds[[city]][1]],destfile = zipfile)
-  unzip(zipfile,exdir = paste0(data_dir,city))
+
+  for(city in names(cities)){
+    feedids = gtfs_feeds[[city]]
+    # r5r handles multiple GTFS in zip format
+    for(feedid in feedids){
+      zipfile=paste0(data_dir,city,'/',city,'_',feedid,'.zip')
+      download.file(catalog$urls.latest[feedid],destfile = zipfile)
+    }
+  }
+
 }
 
+
+#######
+# 4) Construct the networks using r5r
+#######
+
+
+if(processing_steps['contruct_network']){
+
+  for(city in names(cities)){
+    network <- setup_r5(data_path = paste0(data_dir,city))
+    street_net <- street_network_to_sf(network)
+  }
+  
 }
+  
 
-# 2.3) Construct the network using r5r
-
-Sys.setenv(JAVA_HOME = '/usr/lib/jvm/java-1.21.0-openjdk-amd64') # r5r requires java 21
-library(r5r) # install rJava with apt : https://github.com/s-u/rJava/issues/255 (fails jni otherwise)
-options(java.parameters = '-Xmx32G')
-
-network <- setup_r5(data_path = paste0(data_dir,city))
-street_net <- street_network_to_sf(network)
+#######
+# 5) Construct multimodal isochrones with r5r
+#######
 
 
-# 2.4) Construct isochrones
+if(processing_steps['compute_isochrones']){
 
+  orig = data.frame(id='1',st_coordinates(st_centroid(broad_bbox))); names(orig)<-c('id','lon','lat')
+  points_dest = point_grid(st_centroid(broad_bbox), 1000, 30)
+  dest = st_coordinates(points_dest)
+  dest = data.frame(id = as.character(1:nrow(dest)), lon=dest[,1], lat=dest[,2])
 
-#'
-#' constructs a point grid around the origin point (wgs84), with a given step (meters), of width/height 2*size+1
-point_grid <- function(orig, step, size){
-  p0 = st_coordinates(st_transform(orig,etrs89lcc))
-  x0 = p0[1,1]; y0 = p0[1,2]
-  xcoords = seq(from = x0 - size*step, to = x0 + size*step, by = step)
-  ycoords = seq(from = y0 - size*step, to = y0 + size*step, by = step)
-  allx = matrix(data=rep(xcoords,length(ycoords)),nrow = length(ycoords), byrow = T)
-  ally = matrix(data=rep(ycoords,length(xcoords)),ncol = length(xcoords), byrow = F)
-  return(st_transform(st_sfc(st_multipoint(as.matrix(data.frame(X = c(allx), Y=c(ally)))), crs = etrs89lcc), wgs84))
-}
-
-orig = data.frame(id='1',st_coordinates(st_centroid(broad_bbox))); names(orig)<-c('id','lon','lat')
-points_dest = point_grid(st_centroid(broad_bbox), 1000, 30)
-dest = st_coordinates(points_dest)
-dest = data.frame(id = as.character(1:nrow(dest)), lon=dest[,1], lat=dest[,2])
-
-
-
-
-# 2) Construct multimodal isochrone
-
-# pete en mem avec 100km
-#isochrone = r5r::isochrone(network,origins = orig ,mode=c( "TRANSIT", "CAR"))
-#plot(isochrone[2,])
-travel_time = travel_time_matrix(network, orig, dest,mode=c("TRANSIT","CAR"),
+  travel_time = travel_time_matrix(network, orig, dest,mode=c("TRANSIT","CAR"),
                                  mode_egress = "WALK",
                                  max_trip_duration = 240,verbose = T, progress = T)
-dest$time = rep(NA, nrow(dest))
-dest$time[as.numeric(travel_time$to_id)] = travel_time$travel_time_p50
-ggplot(dest[!is.na(dest$time),])+geom_point(aes(x=lon,y=lat,col=time),size=2)
+  dest$time = rep(NA, nrow(dest))
+  dest$time[as.numeric(travel_time$to_id)] = travel_time$travel_time_p50
+  
+  #ggplot(dest[!is.na(dest$time),])+geom_point(aes(x=lon,y=lat,col=time),size=2)
 
-det = detailed_itineraries(network, orig, dest,mode=c("TRANSIT","CAR"),
-                           max_trip_duration = 360,verbose = T, progress = T)
+  #det = detailed_itineraries(network, orig, dest,mode=c("TRANSIT","CAR"),
+  #                         max_trip_duration = 360,verbose = T, progress = T)
 
-library(ggplot2)
-ggplot() +geom_sf(data = street_net$edges, color='gray85') +
-  geom_sf(data = det, aes(color=mode)) +
-  facet_wrap(.~option) + 
-  theme_void()
+  #library(ggplot2)
+  #ggplot() +geom_sf(data = street_net$edges, color='gray85') +
+  #geom_sf(data = det, aes(color=mode)) +
+  #facet_wrap(.~option) + 
+  #theme_void()
 
-# TODO heuristic to calculate approximate isochrones : PT+WALK+BICYCLE, CAR, PT+CAR
+  # TODO heuristic to calculate approximate isochrones : PT+WALK+BICYCLE, CAR, PT+CAR
+
+}
+
 
 
 

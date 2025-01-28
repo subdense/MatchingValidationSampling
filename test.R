@@ -98,6 +98,15 @@
 #gtfs_fr[[2]]
 
 
+
+#### isochrones
+# pete en mem avec 100km
+#isochrone = r5r::isochrone(network,origins = orig ,mode=c( "TRANSIT", "CAR"))
+#plot(isochrone[2,])
+
+
+
+
 # Get buildings within the area
 
 # export data : zenodo, nakala? (flat), (~dataverse~)
