@@ -107,6 +107,20 @@
 
 
 
+# visu detailed itineraries
+#det = detailed_itineraries(network, orig, dest,mode=c("TRANSIT","CAR"),
+#                         max_trip_duration = 360,verbose = T, progress = T)
+#street_net <- street_network_to_sf(network)
+#library(ggplot2)
+#ggplot() +geom_sf(data = street_net$edges, color='gray85') +
+#geom_sf(data = det, aes(color=mode)) +
+#facet_wrap(.~option) + 
+#theme_void()
+
+
+
+
+
 # Get buildings within the area
 
 # export data : zenodo, nakala? (flat), (~dataverse~)
