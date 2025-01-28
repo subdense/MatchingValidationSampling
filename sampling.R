@@ -37,8 +37,12 @@ max_bbox_radius = 100 #km
 # resolution of the grid of destination points to compute travel time, in meters
 travel_time_destinations_resolution = 1000
 
+# travel time defining the functional area (https://www.sciencedirect.com/science/article/pii/S0094119020300139 : no empirical value for max commuting time?)
+max_travel_time = 90
+
 processing_steps = c(download_osm=T, road_network=T, download_gtfs=T,
-                     contruct_network=T, compute_isochrones=T)
+                     contruct_network=T, compute_isochrones=T,
+                     extract_buildings=T)
 
 # save isochrone map in a png
 export_isochrone_map = T
@@ -83,38 +87,10 @@ if(processing_steps['download_osm']){
 if(processing_steps['road_network']){
 
   for(city in names(cities)){
-    city_centroid = st_transform(st_centroid(st_sfc(st_multipoint(t(osmdata::getbb(city)))) %>% st_set_crs(wgs84)), etrs89lcc)
-    bbox_data = c(st_coordinates(city_centroid)[,1] - max_bbox_radius*1000, st_coordinates(city_centroid)[,2] - max_bbox_radius*1000,
-                  st_coordinates(city_centroid)[,1] - max_bbox_radius*1000, st_coordinates(city_centroid)[,2] + max_bbox_radius*1000,
-                  st_coordinates(city_centroid)[,1] + max_bbox_radius*1000, st_coordinates(city_centroid)[,2] - max_bbox_radius*1000,
-                  st_coordinates(city_centroid)[,1] + max_bbox_radius*1000, st_coordinates(city_centroid)[,2] + max_bbox_radius*1000
-                 )
-    broad_bbox = st_bbox(st_transform(st_sfc(st_multipoint(matrix(data = bbox_data, ncol = 2, byrow = T)), crs = etrs89lcc), wgs84)) %>% st_as_sfc()
+    city_centroid = get_city_centroid(city,wgs84,etrs89lcc)
+    broad_bbox = get_bbox(city_centroid,max_bbox_radius,wgs84,etrs89lcc)
   
-    datafiles=c()
-    for(country in cities[[city]]){
-      datafile_root = paste0('geofabrik_',strsplit(tail(strsplit(oe_match(country)$url,'/',fixed=T)[[1]], n=1),'.',fixed=T)[[1]][1])
-      datafile = paste0(datafile_root,'.osm.pbf')
-      highwaysfile = paste0(osm_data_dir,datafile_root,'_',city,'_highways','.osm.pbf')
-      datafiles = append(datafiles,highwaysfile)
-      
-      # osmosis command to extract from bounding box and filter highways
-      system(paste0('osmosis --read-pbf ', osm_data_dir, datafile,
-                  ' --bounding-box top=', st_bbox(broad_bbox)$ymax,
-                  ' left=',st_bbox(broad_bbox)$xmin, ' bottom=',st_bbox(broad_bbox)$ymin,
-                  ' right=',st_bbox(broad_bbox)$xmax,' --tf accept-ways highway=* --used-node --write-pbf ',
-                  highwaysfile)
-           )
-    }
-  
-    # osmosis command to merge pbf files (command `--merge` has to appear N_files - 1)
-    system(
-      paste0('osmosis --rb ',paste0(datafiles,collapse = ' --rb '),' ',paste0(rep('--merge',length(cities[[city]])-1),collapse=' '),' --wb ',osm_data_dir,city,"_highways.osm.pbf")
-          )
-    
-    # copy final file to data dir
-    system(paste0('cp ',osm_data_dir,city,'_highways.osm.pbf ',data_dir,city,'/highways.osm.pbf'))
-    
+    filter_osmpbf_file(city,cities,osm_data_dir,data_dir,broad_bbox,"highway")
   }
   
 }
@@ -176,8 +152,8 @@ if(processing_steps['compute_isochrones']){
     # reload network from cached data (will construct it if not cached)
     network <- setup_r5(data_path = paste0(data_dir,city))
     
-    city_centroid = st_centroid(st_sfc(st_multipoint(t(osmdata::getbb(city)))) %>% st_set_crs(wgs84))
-  
+    city_centroid = get_city_centroid(city,wgs84,etrs89lcc)
+      
     orig = data.frame(id='1',st_coordinates(city_centroid)); names(orig)<-c('id','lon','lat')
     points_dest = point_grid(st_centroid(broad_bbox), travel_time_destinations_resolution, max_bbox_radius)
     dest = st_coordinates(points_dest)
@@ -190,14 +166,14 @@ if(processing_steps['compute_isochrones']){
     
     # different mode combinations : PT+BICYCLE (goes broader than walking and we need an upper bound of the area),
     #       CAR, PT+BICYCLE+CAR EGRESS (car left in parking at destination)
-    travel_time_car =  travel_time_matrix(network, orig, dest,
+    travel_time_car = travel_time_matrix(network, orig, dest,
                       mode=c("CAR"),
                       departure_datetime = departure_datetime,
                       max_trip_duration = 240,
                       verbose = F,progress = T
                     )
     
-    travel_time_pt =  travel_time_matrix(network, orig, dest,
+    travel_time_pt = travel_time_matrix(network, orig, dest,
       mode=c("BICYCLE", "TRANSIT"),
       mode_egress = c("BICYCLE"),
       departure_datetime = departure_datetime,
@@ -205,7 +181,7 @@ if(processing_steps['compute_isochrones']){
       verbose = F,progress = T
     )
     
-    travel_time_pt_car =  travel_time_matrix(network, orig, dest,
+    travel_time_pt_car = travel_time_matrix(network, orig, dest,
                                          mode=c("BICYCLE", "TRANSIT"),
                                          mode_egress = c("CAR"),
                                          departure_datetime = departure_datetime,
@@ -223,24 +199,60 @@ if(processing_steps['compute_isochrones']){
     
     dest$time = pmin(dest$time_car, dest$time_pt, dest$time_ptcar, na.rm = T)
     
+    for(j in 5:7){dest[is.na(dest[,j]),j]=Inf};dest[is.na(dest[,4]),4]=-Inf
+    dest$mode = apply(dest,1,function(row){if(as.numeric(row[4])==as.numeric(row[5])){return('car')}else{if(as.numeric(row[4])==as.numeric(row[6])){return('PT')}else{if(as.numeric(row[4])==as.numeric(row[7])){return('PT-car')}else{return(NA)}}}})
+    
     if(export_isochrone_map){
       ggsave(
         ggplot(dest[!is.na(dest$time),])+
-          #geom_point(aes(x=lon,y=lat,col=ifelse(time_pt>120,'white','grey')))+
-          geom_point(aes(x=lon,y=lat,col=time),size=1.3,shape=15)+
+          geom_point(aes(x=lon,y=lat,col=time),size=1.4,shape=15)+
           geom_point(data=orig,aes(x=lon,y=lat),color='red')+
-          #scale_colour_gradient2(low='blue',high='red',mid = 'white',midpoint = median(dest$time_pt,na.rm = T))+
-          scale_colour_viridis(name='Travel time'),
+          scale_colour_viridis(name='Travel time\n(all modes)')+ggtitle(city),
         filename = paste0(res_dir,'travel_time_map_allmodes_',city,'_',max_bbox_radius,'km.png'),
         width = 30, height=30, units = 'cm'
       )
+      ggsave(
+        ggplot(dest[!is.na(dest$time_car),])+
+          geom_point(aes(x=lon,y=lat,col=time_car),size=1.4,shape=15)+
+          geom_point(data=orig,aes(x=lon,y=lat),color='red')+
+          scale_colour_viridis(name='Travel time\n(car)')+ggtitle(city),
+        filename = paste0(res_dir,'travel_time_map_car_',city,'_',max_bbox_radius,'km.png'),
+        width = 30, height=30, units = 'cm'
+      )
+      ggsave(
+        ggplot(dest[!is.na(dest$time_pt),])+
+          geom_point(aes(x=lon,y=lat,col=time_pt),size=1.4,shape=15)+
+          geom_point(data=orig,aes(x=lon,y=lat),color='red')+
+          scale_colour_viridis(name='Travel time\n(public transport)')+ggtitle(city),
+        filename = paste0(res_dir,'travel_time_map_pt_',city,'_',max_bbox_radius,'km.png'),
+        width = 30, height=30, units = 'cm'
+      )
+      ggsave(
+        ggplot(dest[!is.na(dest$time_ptcar),])+
+          geom_point(aes(x=lon,y=lat,col=time_ptcar),size=1.4,shape=15)+
+          geom_point(data=orig,aes(x=lon,y=lat),color='red')+
+          scale_colour_viridis(name='Travel time\n(PT and car)')+ggtitle(city),
+        filename = paste0(res_dir,'travel_time_map_ptcar_',city,'_',max_bbox_radius,'km.png'),
+        width = 30, height=30, units = 'cm'
+      )
+      ggsave(
+        ggplot(dest[!is.na(dest$mode),])+
+          geom_point(aes(x=lon,y=lat,col=mode),size=1.4,shape=15)+
+          geom_point(data=orig,aes(x=lon,y=lat),color='red')+
+          scale_colour_discrete(name='Travel mode')+ggtitle(city),
+        filename = paste0(res_dir,'travel_mode_map_',city,'_',max_bbox_radius,'km.png'),
+        width = 30, height=30, units = 'cm'
+      )
+      
     }
- 
+    
+    # export the isochrone polygon
+    fuapoints = st_cast(st_transform(st_sfc(st_multipoint(as.matrix(dest[dest$time<max_travel_time,c('lon','lat')])),crs = wgs84),crs = etrs89lcc),to="POINT")
+    fuabuffer = st_cast(st_union(st_buffer(fuapoints,travel_time_destinations_resolution)),to="POLYGON")
+    st_write(fuabuffer,dsn=paste0(res_dir,'isochrone_',max_travel_time,'min_',city,'.gpkg'),layer = paste0('isochrone_',max_travel_time,'min'))
+    
   }
   
-  
-  
-
 }
 
 
@@ -249,5 +261,18 @@ if(processing_steps['compute_isochrones']){
 ######
 # 6) Extract buildings for the full area
 ######
+
+
+if(processing_steps['extract_buildings']){
+  
+  for(city in names(cities)){
+    city_centroid = get_city_centroid(city,wgs84,etrs89lcc)
+    broad_bbox = get_bbox(city_centroid,max_bbox_radius,wgs84,etrs89lcc)
+    
+    filter_osmpbf_file(city,cities,osm_data_dir,data_dir,broad_bbox,"building")
+  }
+  
+}
+
 
 
