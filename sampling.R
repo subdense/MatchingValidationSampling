@@ -40,9 +40,9 @@ travel_time_destinations_resolution = 1000
 # travel time defining the functional area (https://www.sciencedirect.com/science/article/pii/S0094119020300139 : no empirical value for max commuting time?)
 max_travel_time = 90
 
-processing_steps = c(download_osm=T, road_network=T, download_gtfs=T,
-                     contruct_network=T, compute_isochrones=T,
-                     extract_buildings=T)
+processing_steps = c(download_osm=F, road_network=F, download_gtfs=F,
+                     contruct_network=F, compute_isochrones=F,
+                     extract_buildings=T, compute_sampling_area=T)
 
 # save isochrone map in a png
 export_isochrone_map = T
@@ -271,6 +271,20 @@ if(processing_steps['extract_buildings']){
     
     filter_osmpbf_file(city,cities,osm_data_dir,data_dir,broad_bbox,"building")
   }
+  
+}
+
+
+#####
+# 7) Construct sampling area
+#####
+
+
+if(processing_steps['compute_sampling_area']){
+  
+  
+  
+  
   
 }
 
