@@ -40,12 +40,16 @@ travel_time_destinations_resolution = 1000
 # travel time defining the functional area (https://www.sciencedirect.com/science/article/pii/S0094119020300139 : no empirical value for max commuting time?)
 max_travel_time = 90
 
+# buffer size in meters to compute the built area
+built_area_buffer_size = 500
+
+
 processing_steps = c(download_osm=F, road_network=F, download_gtfs=F,
                      contruct_network=F, compute_isochrones=F,
                      extract_buildings=T, compute_sampling_area=T)
 
-# save isochrone map in a png
-export_isochrone_map = T
+# save maps in a png
+export_maps = T
 
 osm_data_dir = './data/osm/'
 data_dir = './data/'
@@ -202,7 +206,7 @@ if(processing_steps['compute_isochrones']){
     for(j in 5:7){dest[is.na(dest[,j]),j]=Inf};dest[is.na(dest[,4]),4]=-Inf
     dest$mode = apply(dest,1,function(row){if(as.numeric(row[4])==as.numeric(row[5])){return('car')}else{if(as.numeric(row[4])==as.numeric(row[6])){return('PT')}else{if(as.numeric(row[4])==as.numeric(row[7])){return('PT-car')}else{return(NA)}}}})
     
-    if(export_isochrone_map){
+    if(export_maps){
       ggsave(
         ggplot(dest[!is.na(dest$time),])+
           geom_point(aes(x=lon,y=lat,col=time),size=1.4,shape=15)+
@@ -270,6 +274,12 @@ if(processing_steps['extract_buildings']){
     broad_bbox = get_bbox(city_centroid,max_bbox_radius,wgs84,etrs89lcc)
     
     filter_osmpbf_file(city,cities,osm_data_dir,data_dir,broad_bbox,"building")
+    
+    filename_root = paste0(data_dir,city,'/building')
+    
+    system(
+      paste0('ogr2ogr -f GPKG ',filename_root,'.gpkg ',filename_root,'.osm.pbf')
+    )
   }
   
 }
@@ -282,9 +292,40 @@ if(processing_steps['extract_buildings']){
 
 if(processing_steps['compute_sampling_area']){
   
-  
-  
-  
+  for(city in names(cities)){
+    
+    #st_layers(paste0(data_dir,city,'/building.gpkg'))
+    buildings = st_read(paste0(data_dir,city,'/building.gpkg'),layer = 'multipolygons')
+    isochrone = st_read(paste0(res_dir,'isochrone_',max_travel_time,'min_',city,'.gpkg'))
+    
+    # for memory purposes, run buffer sequentially on subsets
+    batchsize = 100000
+    builtup = st_as_sf(st_cast(st_union(st_buffer(st_transform(st_make_valid(buildings[1:batchsize,]),crs = etrs89lcc), built_area_buffer_size)),to="POLYGON"))
+    ind = batchsize+1
+    while(ind<=nrow(buildings)){
+      show(ind)
+      newbuiltup = st_as_sf(st_cast(st_union(st_buffer(st_transform(st_make_valid(buildings[ind:min((ind+batchsize-1),nrow(buildings)),]),crs = etrs89lcc), built_area_buffer_size)),to="POLYGON"))
+      builtup = rbind(builtup,newbuiltup)
+      show(paste0("  polygons in builtup = ",nrow(builtup)))
+      ind = ind+batchsize
+    }
+    # merge to one single multipolygon and split into polygons
+    builtup_merged = st_cast(st_union(builtup),to="POLYGON")
+    
+    if(export_maps){
+      ggsave(
+        ggplot(builtup_merged)+geom_sf(fill='black')+geom_sf(data=isochrone,color='red',fill=alpha('grey',0.1))+ggtitle(city),
+        filename = paste0(res_dir,'builtup-isochrone',max_travel_time,'min_',city,'_',max_bbox_radius,'km.png'),
+        width = 30, height=30, units = 'cm'
+      )
+    }
+      
+    # sampling area is intersection of builtup and isochrone
+    sampling_area = st_intersection(isochrone,builtup)
+    
+    st_write(sampling_area,dsn=paste0(res_dir,'samplingarea_',max_travel_time,'min_',city,'_',max_bbox_radius,'km.gpkg'),layer = paste0('samplingarea_',max_travel_time,'min'))
+    
+  }
   
 }
 
