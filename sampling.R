@@ -21,7 +21,7 @@ options(java.parameters = '-Xmx32G')
 
 # cities and their countries (needed for OSM data download)
 #cities = list(
-#  'Strasbourg'=c('France','Germany'),
+#              'Strasbourg'=c('France','Germany'),
 #              'Toulouse'=c('France')#,
 #              'Dortmund'=c('Germany'),
 #              'Frankfurt'=c('Germany'),
@@ -43,10 +43,16 @@ max_travel_time = 90
 # buffer size in meters to compute the built area
 built_area_buffer_size = 500
 
+# number of sampling points
+sampling_points = 100
 
-processing_steps = c(download_osm=F, road_network=F, download_gtfs=F,
-                     contruct_network=F, compute_isochrones=F,
-                     extract_buildings=T, compute_sampling_area=T)
+# random seed
+seed = 42
+
+processing_steps = c(download_osm=T, road_network=T, download_gtfs=T,
+                     contruct_network=T, compute_isochrones=T,
+                     extract_buildings=T, compute_sampling_area=T,
+                     sample_points=T)
 
 # save maps in a png
 export_maps = T
@@ -305,29 +311,75 @@ if(processing_steps['compute_sampling_area']){
     while(ind<=nrow(buildings)){
       show(ind)
       newbuiltup = st_as_sf(st_cast(st_union(st_buffer(st_transform(st_make_valid(buildings[ind:min((ind+batchsize-1),nrow(buildings)),]),crs = etrs89lcc), built_area_buffer_size)),to="POLYGON"))
-      builtup = rbind(builtup,newbuiltup)
+      tmpbuiltup = rbind(builtup,newbuiltup)
+      builtup = st_as_sf(st_cast(st_union(tmpbuiltup),to="POLYGON"))
       show(paste0("  polygons in builtup = ",nrow(builtup)))
       ind = ind+batchsize
     }
     # merge to one single multipolygon and split into polygons
-    builtup_merged = st_cast(st_union(builtup),to="POLYGON")
+    #builtup_merged = st_cast(st_union(builtup),to="POLYGON")
     
     if(export_maps){
       ggsave(
-        ggplot(builtup_merged)+geom_sf(fill='black')+geom_sf(data=isochrone,color='red',fill=alpha('grey',0.1))+ggtitle(city),
+        ggplot(builtup)+geom_sf(fill='black')+geom_sf(data=isochrone,color='red',fill=alpha('grey',0.1))+ggtitle(city),
         filename = paste0(res_dir,'builtup-isochrone',max_travel_time,'min_',city,'_',max_bbox_radius,'km.png'),
-        width = 30, height=30, units = 'cm'
+        width = 10, height=10, units = 'cm'
       )
     }
       
     # sampling area is intersection of builtup and isochrone
     sampling_area = st_intersection(isochrone,builtup)
     
-    st_write(sampling_area,dsn=paste0(res_dir,'samplingarea_',max_travel_time,'min_',city,'_',max_bbox_radius,'km.gpkg'),layer = paste0('samplingarea_',max_travel_time,'min'))
+    st_write(sampling_area,dsn=paste0(data_dir,'samplingarea_',max_travel_time,'min_',city,'_',max_bbox_radius,'km.gpkg'),layer = paste0('samplingarea_',max_travel_time,'min'),append=F)
     
   }
   
 }
+
+
+
+#####
+# 8) Sample points
+#####
+
+
+if(processing_steps['sample_points']){
+  
+  for(city in names(cities)){
+    
+    sampling_area = st_transform(st_read(dsn = paste0(data_dir,'samplingarea_',max_travel_time,'min_',city,'_',max_bbox_radius,'km.gpkg'),layer = paste0('samplingarea_',max_travel_time,'min')),wgs84)
+    
+    city_centroid = get_city_centroid(city,wgs84,etrs89lcc)
+    broad_bbox = st_bbox(get_bbox(city_centroid,max_bbox_radius,wgs84,etrs89lcc))
+    
+    # small number of points to be sampled -> rejection sampling is fine
+    points=data.frame()
+    while(nrow(points)<sampling_points){
+      lon = runif(1,min=broad_bbox$xmin,max=broad_bbox$xmax)
+      lat = runif(1,min=broad_bbox$ymin,max=broad_bbox$ymax)
+      if(length(st_within(st_point(c(lon,lat)),sampling_area)[[1]])>0){
+        points=rbind(points,c(lon=lon,lat=lat))
+      }
+    }
+    names(points)<-c('lon','lat')
+    
+    if(export_maps){
+      ggsave(
+        ggplot(sampling_area)+geom_sf(fill=alpha('grey',0.3))+geom_point(data=points,aes(x=lon,y=lat),col='red')+ggtitle(city),
+        filename = paste0(res_dir,'sampling_',max_travel_time,'min_',city,'_',max_bbox_radius,'km.png'),
+        width = 10, height=10, units = 'cm'
+      )
+    }
+   
+    final_points = st_cast(st_sfc(st_multipoint(as.matrix(points)), crs = wgs84),to="POINT")
+    
+    st_write(final_points,dsn=paste0(data_dir,'sampling.gpkg'),layer = paste0('sampling_',max_travel_time,'min_',city,'_',max_bbox_radius,'km_seed',seed),append=F)
+    
+  }
+  
+}
+
+
 
 
 
