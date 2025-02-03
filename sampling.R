@@ -141,13 +141,6 @@ if(processing_steps['download_gtfs']){
       write_gtfs(gtfs,zipfile)
     }
     
-    # manuals checks of GTFS data
-    # library(tidytransit)
-    #toulouse = read_gtfs(paste0(data_dir,'Toulouse/Toulouse_1024.zip'))
-    #plot(gtfs_as_sf(toulouse))
-    #ter = read_gtfs(paste0(data_dir,'Toulouse/Toulouse_1205.zip'))
-    #strasbourg = read_gtfs(paste0(data_dir,'Strasbourg/Strasbourg_856.zip')) # service with most dates : 2024-08-15 ! pb jour ferié, mais inclus "semaine00" -> ok? - replace with a TER compatible date
-    
   }
 
 }
@@ -402,7 +395,7 @@ if(processing_steps['sample_points']){
    
     final_points = st_cast(st_sfc(st_multipoint(as.matrix(points)), crs = wgs84),to="POINT")
     
-    st_write(final_points,dsn=paste0(data_dir,'sampling.gpkg'),layer = paste0('sampling_',max_travel_time,'min_',city,'_',max_bbox_radius,'km_seed',seed),append=F)
+    st_write(final_points,dsn=paste0(res_dir,'sampling.gpkg'),layer = paste0('sampling_',max_travel_time,'min_',city,'_',max_bbox_radius,'km_seed',seed),append=T)
     
   }
   
