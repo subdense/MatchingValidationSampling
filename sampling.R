@@ -12,6 +12,7 @@ library(httr)
 library(ggplot2)
 library(viridis)
 library(r5r) # install rJava with apt : https://github.com/s-u/rJava/issues/255 (fails jni otherwise)
+library(tidytransit)
 
 source('functions.R')
 
@@ -20,15 +21,16 @@ options(java.parameters = '-Xmx32G')
 
 
 # cities and their countries (needed for OSM data download)
-#cities = list(
-#              'Strasbourg'=c('France','Germany'),
-#              'Toulouse'=c('France')#,
-#              'Dortmund'=c('Germany'),
-#              'Frankfurt'=c('Germany'),
+cities = list(
+              #'Strasbourg'=c('France','Germany'),
+              'Strasbourg'=c('France'), # no data for the German part of Strasbourg for now
+              'Toulouse'=c('France'),
+              'Dortmund'=c('Germany'),
+              'Frankfurt'=c('Germany')#,
 #              'Liverpool'=c('England', 'Wales'),
 #              'Bristol'=c('England', 'Wales')
-#              )
-cities=list('Luxembourg'=c('Luxembourg', 'France', 'Germany', 'Belgium')) # test
+              )
+#cities=list('Luxembourg'=c('Luxembourg', 'France', 'Germany', 'Belgium')) # test
 
 # radius in which networks are constructed to build isochrones
 max_bbox_radius = 100 #km 
@@ -48,6 +50,11 @@ sampling_points = 100
 
 # random seed
 seed = 42
+
+# GTFS data ad hoc processing - to be checked and modified accordingly
+source('gtfs.R')
+
+
 
 processing_steps = c(download_osm=T, road_network=T, download_gtfs=T,
                      contruct_network=T, compute_isochrones=T,
@@ -70,6 +77,8 @@ for(city in names(cities)){
   dir.create(paste0(data_dir,city),showWarnings = F)
 }
 dir.create(res_dir, showWarnings = F)
+
+set.seed(seed)
 
 ########
 # 1) Get OSM data
@@ -97,6 +106,9 @@ if(processing_steps['download_osm']){
 if(processing_steps['road_network']){
 
   for(city in names(cities)){
+    
+    show(paste0('Extracting road network for ',city))
+    
     city_centroid = get_city_centroid(city,wgs84,etrs89lcc)
     broad_bbox = get_bbox(city_centroid,max_bbox_radius,wgs84,etrs89lcc)
   
@@ -115,22 +127,27 @@ if(processing_steps['download_gtfs']){
   # get open catalog, does not need an API token
   catalog = read_csv('https://storage.googleapis.com/storage/v1/b/mdb-csv/o/sources.csv?alt=media')
 
-  # mdb ids in the catalog (to be determined by hand)
-  gtfs_feeds = list(
-    'Luxembourg'=c(1091),#c(1108,1091),# Chemins Fer Luxembourgeois, Aggregated Luxembourg -> only Aggreg (uncompatible dates)
-    'Toulouse'=c(1024, 1205) # Tisséo, TER France
-  )
-  gtfs_dates = list(
-    'Luxembourg'='29-10-2024'
-  )
+  # GTFS feeds ids and GTFS dates : global variables at the beginning of the script
 
   for(city in names(cities)){
+    
+    show(paste0('Collecting GTFS data for ',city))
+    
     feedids = gtfs_feeds[[city]]
     # r5r handles multiple GTFS in zip format
     for(feedid in feedids){
       zipfile=paste0(data_dir,city,'/',city,'_',feedid,'.zip')
-      download.file(catalog$urls.latest[feedid],destfile = zipfile)
+      gtfs = gtfs_preprocessing[[city]](read_gtfs(catalog$urls.latest[feedid]),feedid)
+      write_gtfs(gtfs,zipfile)
     }
+    
+    # manuals checks of GTFS data
+    # library(tidytransit)
+    #toulouse = read_gtfs(paste0(data_dir,'Toulouse/Toulouse_1024.zip'))
+    #plot(gtfs_as_sf(toulouse))
+    #ter = read_gtfs(paste0(data_dir,'Toulouse/Toulouse_1205.zip'))
+    #strasbourg = read_gtfs(paste0(data_dir,'Strasbourg/Strasbourg_856.zip')) # service with most dates : 2024-08-15 ! pb jour ferié, mais inclus "semaine00" -> ok? - replace with a TER compatible date
+    
   }
 
 }
@@ -144,6 +161,9 @@ if(processing_steps['download_gtfs']){
 if(processing_steps['contruct_network']){
 
   for(city in names(cities)){
+    
+    show(paste0('Constructing network for ',city))
+    
     network <- setup_r5(data_path = paste0(data_dir,city),overwrite = T)
   }
   
@@ -158,6 +178,8 @@ if(processing_steps['contruct_network']){
 if(processing_steps['compute_isochrones']){
 
   for(city in names(cities)){
+    
+    show(paste0('Computing travel time for ',city))
     
     # reload network from cached data (will construct it if not cached)
     network <- setup_r5(data_path = paste0(data_dir,city))
@@ -276,6 +298,9 @@ if(processing_steps['compute_isochrones']){
 if(processing_steps['extract_buildings']){
   
   for(city in names(cities)){
+    
+    show(paste0('Extracting buildings for ',city))
+    
     city_centroid = get_city_centroid(city,wgs84,etrs89lcc)
     broad_bbox = get_bbox(city_centroid,max_bbox_radius,wgs84,etrs89lcc)
     
@@ -299,6 +324,8 @@ if(processing_steps['extract_buildings']){
 if(processing_steps['compute_sampling_area']){
   
   for(city in names(cities)){
+    
+    show(paste0('Computing sampling area for ',city))
     
     #st_layers(paste0(data_dir,city,'/building.gpkg'))
     buildings = st_read(paste0(data_dir,city,'/building.gpkg'),layer = 'multipolygons')
@@ -346,6 +373,8 @@ if(processing_steps['compute_sampling_area']){
 if(processing_steps['sample_points']){
   
   for(city in names(cities)){
+    
+    show(paste0('Sampling points for ',city))
     
     sampling_area = st_transform(st_read(dsn = paste0(data_dir,'samplingarea_',max_travel_time,'min_',city,'_',max_bbox_radius,'km.gpkg'),layer = paste0('samplingarea_',max_travel_time,'min')),wgs84)
     
