@@ -56,7 +56,7 @@ source('gtfs.R')
 
 
 
-processing_steps = c(download_osm=F, road_network=F, download_gtfs=T,
+processing_steps = c(download_osm=F, road_network=F, download_gtfs=F,
                      contruct_network=T, compute_isochrones=T,
                      extract_buildings=T, compute_sampling_area=T,
                      sample_points=T)
