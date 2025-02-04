@@ -136,8 +136,10 @@ if(processing_steps['download_gtfs']){
     feedids = gtfs_feeds[[city]]
     # r5r handles multiple GTFS in zip format
     for(feedid in feedids){
+      url=catalog$urls.latest[feedid]
       zipfile=paste0(data_dir,city,'/',city,'_',feedid,'.zip')
-      gtfs = gtfs_preprocessing[[city]](read_gtfs(catalog$urls.latest[feedid]),feedid)
+      show(paste0('	Saving ',url,' to ',zipfile))
+      gtfs = gtfs_preprocessing[[city]](read_gtfs(url),feedid)
       write_gtfs(gtfs,zipfile)
     }
     
