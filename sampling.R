@@ -179,7 +179,7 @@ if(processing_steps['compute_isochrones']){
     # reload network from cached data (will construct it if not cached)
     network <- setup_r5(data_path = paste0(data_dir,city))
     
-    city_centroid = get_city_centroid(city,wgs84,etrs89lcc)
+    city_centroid = st_transform(get_city_centroid(city,wgs84,etrs89lcc),wgs84)
     broad_bbox = get_bbox(city_centroid,max_bbox_radius,wgs84,etrs89lcc)
 
     orig = data.frame(id='1',st_coordinates(city_centroid)); names(orig)<-c('id','lon','lat')
@@ -198,7 +198,7 @@ if(processing_steps['compute_isochrones']){
                       mode=c("CAR"),
                       departure_datetime = departure_datetime,
                       max_trip_duration = 240,
-                      verbose = F,progress = T
+                      verbose = T,progress = T
                     )
     
     travel_time_pt = travel_time_matrix(network, orig, dest,
@@ -206,7 +206,7 @@ if(processing_steps['compute_isochrones']){
       mode_egress = c("BICYCLE"),
       departure_datetime = departure_datetime,
       max_trip_duration = 240,
-      verbose = F,progress = T
+      verbose = T,progress = T
     )
     
     travel_time_pt_car = travel_time_matrix(network, orig, dest,
@@ -214,7 +214,7 @@ if(processing_steps['compute_isochrones']){
                                          mode_egress = c("CAR"),
                                          departure_datetime = departure_datetime,
                                          max_trip_duration = 240,
-                                         verbose = F,progress = T
+                                         verbose = T,progress = T
     )
     
   
