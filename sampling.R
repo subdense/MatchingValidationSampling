@@ -179,10 +179,10 @@ if(processing_steps['compute_isochrones']){
     # reload network from cached data (will construct it if not cached)
     network <- setup_r5(data_path = paste0(data_dir,city))
     
-    city_centroid = st_transform(get_city_centroid(city,wgs84,etrs89lcc),wgs84)
+    city_centroid = get_city_centroid(city,wgs84,etrs89lcc)
     broad_bbox = get_bbox(city_centroid,max_bbox_radius,wgs84,etrs89lcc)
 
-    orig = data.frame(id='1',st_coordinates(city_centroid)); names(orig)<-c('id','lon','lat')
+    orig = data.frame(id='1',st_coordinates(st_transform(city_centroid,wgs84))); names(orig)<-c('id','lon','lat')
     points_dest = point_grid(st_centroid(broad_bbox), travel_time_destinations_resolution, max_bbox_radius)
     dest = st_coordinates(points_dest)
     dest = data.frame(id = as.character(1:nrow(dest)), lon=dest[,1], lat=dest[,2])
