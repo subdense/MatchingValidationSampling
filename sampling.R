@@ -57,7 +57,7 @@ source('gtfs.R')
 
 
 processing_steps = c(download_osm=F, road_network=F, download_gtfs=F,
-                     contruct_network=T, compute_isochrones=T,
+                     contruct_network=F, compute_isochrones=T,
                      extract_buildings=T, compute_sampling_area=T,
                      sample_points=T)
 
@@ -180,7 +180,8 @@ if(processing_steps['compute_isochrones']){
     network <- setup_r5(data_path = paste0(data_dir,city))
     
     city_centroid = get_city_centroid(city,wgs84,etrs89lcc)
-      
+    broad_bbox = get_bbox(city_centroid,max_bbox_radius,wgs84,etrs89lcc)
+
     orig = data.frame(id='1',st_coordinates(city_centroid)); names(orig)<-c('id','lon','lat')
     points_dest = point_grid(st_centroid(broad_bbox), travel_time_destinations_resolution, max_bbox_radius)
     dest = st_coordinates(points_dest)
