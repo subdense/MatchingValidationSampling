@@ -17,16 +17,16 @@ library(tidytransit)
 source('functions.R')
 
 Sys.setenv(JAVA_HOME = '/usr/lib/jvm/java-1.21.0-openjdk-amd64') # r5r requires java 21
-options(java.parameters = '-Xmx32G')
+options(java.parameters = '-Xmx18G')
 
 
 # cities and their countries (needed for OSM data download)
 cities = list(
               #'Strasbourg'=c('France','Germany'),
-              'Strasbourg'=c('France'), # no data for the German part of Strasbourg for now
-              'Toulouse'=c('France')#,
-              #'Dortmund'=c('Germany'),
-              #'Frankfurt'=c('Germany')#,
+              #'Strasbourg'=c('France'), # no data for the German part of Strasbourg for now
+              #'Toulouse'=c('France')#,
+              'Dortmund'=c('Germany'),
+              'Frankfurt'=c('Germany')#,
 #              'Liverpool'=c('England', 'Wales'),
 #              'Bristol'=c('England', 'Wales')
               )
@@ -57,7 +57,7 @@ source('gtfs.R')
 
 
 processing_steps = c(download_osm=F, road_network=F, download_gtfs=F,
-                     contruct_network=F, compute_isochrones=F,
+                     contruct_network=F, compute_isochrones=T,
                      extract_buildings=T, compute_sampling_area=T,
                      sample_points=T)
 
