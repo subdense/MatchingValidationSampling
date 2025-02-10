@@ -307,6 +307,13 @@ if(processing_steps['extract_buildings']){
     system(
       paste0('ogr2ogr -f GPKG ',filename_root,'.gpkg ',filename_root,'.osm.pbf')
     )
+    
+    if(file.size(paste0(filename_root,'.gpkg '))>1.5e9){ # split the gpkg file
+      # generic command to split in 3 for example
+      #ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO output_part1.gpkg input.gpkg layer_name -where "rowid <= $(ogrinfo -dialect SQLite -sql "SELECT MAX(rowid)/3 FROM layer_name" input.gpkg)"
+      #ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO output_part2.gpkg input.gpkg layer_name -where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT MAX(rowid)/3 FROM layer_name") AND rowid <= $(ogrinfo -dialect SQLite -sql "SELECT 2*MAX(rowid)/3 FROM layer_name" input.gpkg)"
+      #ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO output_part3.gpkg input.gpkg layer_name -where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT 2*MAX(rowid)/3 FROM layer_name")"
+    }
   }
   
 }
