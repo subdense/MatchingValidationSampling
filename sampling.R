@@ -9,6 +9,7 @@ library(rjson)
 library(dplyr)
 library(readr)
 library(httr)
+library(glue)
 library(ggplot2)
 library(viridis)
 library(r5r) # install rJava with apt : https://github.com/s-u/rJava/issues/255 (fails jni otherwise)
@@ -311,22 +312,26 @@ if(processing_steps['extract_buildings']){
       paste0('ogr2ogr -f GPKG ',filename_root,'.gpkg ',filename_root,'.osm.pbf')
     )
     
-    if(file.size(paste0(filename_root,'.gpkg '))>buildings_file_max_size){ # split the gpkg file
+    if(file.size(paste0(filename_root,'.gpkg'))>buildings_file_max_size){ # split the gpkg file
       # generic command to split in 3 for example
       #ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO output_part1.gpkg input.gpkg layer_name -where "rowid <= $(ogrinfo -dialect SQLite -sql "SELECT MAX(rowid)/3 FROM layer_name" input.gpkg)"
       #ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO output_part2.gpkg input.gpkg layer_name -where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT MAX(rowid)/3 FROM layer_name") AND rowid <= $(ogrinfo -dialect SQLite -sql "SELECT 2*MAX(rowid)/3 FROM layer_name" input.gpkg)"
       #ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO output_part3.gpkg input.gpkg layer_name -where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT 2*MAX(rowid)/3 FROM layer_name")"
-      split_commands = c(paste0('ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO ',filename_root,'1.gpkg ',filename_root,'.gpkg multipolygons -where "rowid <= $(ogrinfo -dialect SQLite -sql "SELECT MAX(rowid)/',buildings_file_N_splits,' FROM multipolygons" ',filename_root,'.gpkg)"'))
+      
+	maxrow=as.numeric(glue(strsplit(system(paste0('ogrinfo -q -dialect SQLite -sql "SELECT MAX(rowid) FROM multipolygons" ',filename_root,'.gpkg'), intern=T),"=")[[4]][2]))
+
+	split_commands = c(paste0('ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO ',filename_root,'1.gpkg ',filename_root,'.gpkg multipolygons -where "rowid <= ',floor(maxrow/buildings_file_N_splits),'"'))
+
       for(k in 2:(buildings_file_N_splits-1)){
         split_commands = append(split_commands,
             paste0('ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO ',filename_root,k,'.gpkg ',filename_root,'.gpkg multipolygons ',
-                   '-where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT ',(k-1),'*MAX(rowid)/',buildings_file_N_splits,' FROM multipolygons") ',
-                   'AND rowid <= $(ogrinfo -dialect SQLite -sql "SELECT ',k,'*MAX(rowid)/',buildings_file_N_splits,' FROM multipolygons" ',filename_root,'.gpkg)"')
+                   '-where "rowid > ',floor((k-1)*maxrow/buildings_file_N_splits),
+                   ' AND rowid <= ',floor(k*maxrow/buildings_file_N_splits),'"')
                   )
       }
       split_commands = append(split_commands,
             paste0('ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO ',filename_root,buildings_file_N_splits,'.gpkg ',filename_root,'.gpkg multipolygons ',
-                   '-where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT ',(buildings_file_N_splits-1),'*MAX(rowid)/',buildings_file_N_splits,' FROM multipolygons" ',filename_root,'.gpkg)"')
+                   '-where "rowid > ',floor((buildings_file_N_splits-1)*maxrow/buildings_file_N_splits),'"')
       )
       
       for(command in split_commands){
