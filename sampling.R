@@ -27,7 +27,7 @@ cities = list(
               #'Strasbourg'=c('France'), # no data for the German part of Strasbourg for now
               #'Toulouse'=c('France')#,
               'Dortmund'=c('Germany'),
-              'Frankfurt'=c('Germany')#,
+#              'Frankfurt'=c('Germany')#,
 #              'Liverpool'=c('England', 'Wales'),
 #              'Bristol'=c('England', 'Wales')
               )
