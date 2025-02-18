@@ -10,7 +10,7 @@ load_data <- function(data_dir,city,type){
   #st_layers(paste0(data_dir,city,'/building.gpkg'))
   #buildings = st_read(paste0(data_dir,city,'/building.gpkg'),layer = 'multipolygons')
   show(paste0('Loading ',type,' for city ',city,' from ',data_dir))
-  fragment_files = 
+  fragment_files = c()
   
   
 }
