@@ -10,9 +10,19 @@ load_data <- function(data_dir,city,type){
   #st_layers(paste0(data_dir,city,'/building.gpkg'))
   #buildings = st_read(paste0(data_dir,city,'/building.gpkg'),layer = 'multipolygons')
   show(paste0('Loading ',type,' for city ',city,' from ',data_dir))
-  fragment_files = c()
-  
-  
+  allfiles=list.files(paste0(data_dir,city))
+  fragment_files = allfiles[grep(allfiles,pattern=paste0(type,"(\\d)+"))]
+  if(length(fragment_files)>1){ # for 1 fragment, load original file
+    res = st_read(paste0(data_dir,city,'/',fragment_files[1]),layer = 'multipolygons')
+    for(k in 2:length(fragment_files)){
+      res = rbind(res,
+                  st_read(paste0(data_dir,city,'/',fragment_files[k]),layer = 'multipolygons')
+                  )
+    }
+  }else{
+    res = st_read(paste0(data_dir,city,'/',type,'.gpkg'),layer = 'multipolygons')
+  }
+  return(res)
 }
 
 
