@@ -1,5 +1,22 @@
 
 
+
+
+
+
+#'
+#' loads (only gpkg for now) data, assuming it can have been split : if fileroot_k exists, loads and concatenates all these
+load_data <- function(data_dir,city,type){
+  #st_layers(paste0(data_dir,city,'/building.gpkg'))
+  #buildings = st_read(paste0(data_dir,city,'/building.gpkg'),layer = 'multipolygons')
+  show(paste0('Loading ',type,' for city ',city,' from ',data_dir))
+  fragment_files = 
+  
+  
+}
+
+
+
 #'
 #' constructs a point grid around the origin point (wgs84), with a given step (meters), of width/height 2*size+1
 point_grid <- function(orig, step, size){

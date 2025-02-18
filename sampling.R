@@ -54,6 +54,9 @@ seed = 42
 # GTFS data ad hoc processing - to be checked and modified accordingly
 source('gtfs.R')
 
+# ad hoc parameters for performance issues
+buildings_file_max_size = 1.5e9
+buildings_file_N_splits = 3
 
 
 processing_steps = c(download_osm=F, road_network=F, download_gtfs=F,
@@ -308,11 +311,27 @@ if(processing_steps['extract_buildings']){
       paste0('ogr2ogr -f GPKG ',filename_root,'.gpkg ',filename_root,'.osm.pbf')
     )
     
-    if(file.size(paste0(filename_root,'.gpkg '))>1.5e9){ # split the gpkg file
+    if(file.size(paste0(filename_root,'.gpkg '))>buildings_file_max_size){ # split the gpkg file
       # generic command to split in 3 for example
       #ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO output_part1.gpkg input.gpkg layer_name -where "rowid <= $(ogrinfo -dialect SQLite -sql "SELECT MAX(rowid)/3 FROM layer_name" input.gpkg)"
       #ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO output_part2.gpkg input.gpkg layer_name -where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT MAX(rowid)/3 FROM layer_name") AND rowid <= $(ogrinfo -dialect SQLite -sql "SELECT 2*MAX(rowid)/3 FROM layer_name" input.gpkg)"
       #ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO output_part3.gpkg input.gpkg layer_name -where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT 2*MAX(rowid)/3 FROM layer_name")"
+      split_commands = c(paste0('ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO ',filename_root,'1.gpkg ',filename_root,'.gpkg multipolygons -where "rowid <= $(ogrinfo -dialect SQLite -sql "SELECT MAX(rowid)/',buildings_file_N_splits,' FROM multipolygons" ',filename_root,'.gpkg)"'))
+      for(k in 2:(buildings_file_N_splits-1)){
+        split_commands = append(split_commands,
+            paste0('ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO ',filename_root,k,'.gpkg ',filename_root,'.gpkg multipolygons ',
+                   '-where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT ',(k-1),'*MAX(rowid)/',buildings_file_N_splits,' FROM multipolygons") ',
+                   'AND rowid <= $(ogrinfo -dialect SQLite -sql "SELECT ',k,'*MAX(rowid)/',buildings_file_N_splits,' FROM multipolygons" ',filename_root,'.gpkg)"')
+                  )
+      }
+      split_commands = append(split_commands,
+            paste0('ogr2ogr -f GPKG -dsco SPATIAL_INDEX=NO ',filename_root,buildings_file_N_splits,'.gpkg ',filename_root,'.gpkg multipolygons ',
+                   '-where "rowid > $(ogrinfo -dialect SQLite -sql "SELECT ',(buildings_file_N_splits-1),'*MAX(rowid)/',buildings_file_N_splits,' FROM multipolygons" ',filename_root,'.gpkg)"')
+      )
+      
+      for(command in split_commands){
+        system(command)
+      }
     }
   }
   
@@ -330,8 +349,8 @@ if(processing_steps['compute_sampling_area']){
     
     show(paste0('Computing sampling area for ',city))
     
-    #st_layers(paste0(data_dir,city,'/building.gpkg'))
-    buildings = st_read(paste0(data_dir,city,'/building.gpkg'),layer = 'multipolygons')
+    # function to handle possibly split gpkg file
+    buildings = load_data(data_dir,city,type)
     isochrone = st_read(paste0(res_dir,'isochrone_',max_travel_time,'min_',city,'.gpkg'))
     
     # for memory purposes, run buffer sequentially on subsets
